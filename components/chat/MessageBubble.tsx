@@ -10,6 +10,15 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, checklistId }: MessageBubbleProps) {
   const isUser = message.role === "user";
+  const handleCopyLink = () => {
+    async function copyLink() {
+      await navigator.clipboard.writeText(
+        `${window.location.origin}/checklist/${checklistId}`
+      );
+      window.open(`/checklist/${checklistId}`, "_blank");
+    }
+    copyLink();
+  };
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
@@ -40,9 +49,7 @@ export function MessageBubble({ message, checklistId }: MessageBubbleProps) {
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-2"
-                onClick={() =>
-                  window.open(`/checklist/${checklistId}`, "_blank")
-                }
+                onClick={handleCopyLink}
               >
                 <ExternalLink size={14} />
                 View Shareable Checklist

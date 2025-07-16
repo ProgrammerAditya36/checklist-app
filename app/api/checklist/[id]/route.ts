@@ -3,10 +3,11 @@ import { NextRequest } from "next/server";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const checklist = temporaryStorage.get(params.id);
+    const { id } = await params;
+    const checklist = temporaryStorage.get(id);
 
     if (!checklist) {
       return Response.json(

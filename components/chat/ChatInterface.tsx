@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { ChatMessage, ChecklistItem } from "@/types";
-import { Send } from "lucide-react";
-import { useState } from "react";
+import { chatStorage } from "@/lib/storage";
+import { ChatMessage, ChatSession, ChecklistItem } from "@/types";
+import { Menu, Send } from "lucide-react";
+import { useEffect, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { ChatSidebar } from "./ChatSidebar";
 import { ImageUpload } from "./ImageUpload";
 import { MessageBubble } from "./MessageBubble";
 
@@ -18,10 +20,91 @@ export function ChatInterface() {
   const [checklistIds, setChecklistIds] = useState<{
     [messageId: string]: string;
   }>({});
+  const [currentSession, setCurrentSession] = useState<ChatSession | null>(
+    null
+  );
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  // Load sessions on mount
+  useEffect(() => {
+    const sessions = chatStorage.getChatSessions();
+    if (sessions.length > 0) {
+      // Load the most recent session
+      const mostRecent = sessions.sort(
+        (a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      )[0];
+      loadSession(mostRecent);
+    } else {
+      // Create a new session if none exist
+      createNewSession();
+    }
+  }, []);
+
+  const createNewSession = () => {
+    const newSession: ChatSession = {
+      id: uuidv4(),
+      title: "New Chat",
+      messages: [],
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    setCurrentSession(newSession);
+    setMessages([]);
+    setChecklistIds({});
+    chatStorage.saveChatSession(newSession);
+    setRefreshTrigger((prev) => prev + 1); // Trigger sidebar refresh
+  };
+
+  const loadSession = (session: ChatSession) => {
+    setCurrentSession(session);
+    setMessages(session.messages);
+    // Note: checklistIds would need to be reconstructed from messages
+    // For now, we'll start fresh with checklistIds
+    setChecklistIds({});
+  };
+
+  const saveCurrentSession = (messagesOverride?: ChatMessage[]) => {
+    if (!currentSession) return;
+    const sessionMessages = messagesOverride || messages;
+    const updatedSession: ChatSession = {
+      ...currentSession,
+      messages: sessionMessages,
+      updatedAt: new Date(),
+      title: generateSessionTitle(sessionMessages),
+    };
+    setCurrentSession(updatedSession);
+    chatStorage.saveChatSession(updatedSession);
+    setRefreshTrigger((prev) => prev + 1);
+  };
+
+  // Debounced save function to prevent too frequent saves during streaming
+  const debouncedSave = (() => {
+    let timeoutId: NodeJS.Timeout;
+    return () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        saveCurrentSession();
+      }, 1000); // Wait 1 second after last update
+    };
+  })();
+
+  const generateSessionTitle = (msgs: ChatMessage[] = messages): string => {
+    if (msgs.length === 0) return "New Chat";
+    const firstUserMessage = msgs.find((m) => m.role === "user");
+    if (firstUserMessage) {
+      const content = firstUserMessage.content;
+      if (content.length > 50) {
+        return content.substring(0, 50) + "...";
+      }
+      return content;
+    }
+    return `Chat ${new Date().toLocaleDateString()}`;
+  };
 
   const handleImageUpload = async (imageUrls: string[]) => {
     setIsLoading(true);
-
     const userMessage: ChatMessage = {
       id: uuidv4(),
       role: "user",
@@ -29,9 +112,9 @@ export function ChatInterface() {
       images: imageUrls,
       timestamp: new Date(),
     };
-
-    setMessages((prev) => [...prev, userMessage]);
-
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    saveCurrentSession(newMessages);
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -41,11 +124,8 @@ export function ChatInterface() {
           imageUrls,
         }),
       });
-
       if (!response.ok) throw new Error("Failed to analyze images");
-
       const data = await response.json();
-
       const assistantMessage: ChatMessage = {
         id: uuidv4(),
         role: "assistant",
@@ -59,12 +139,13 @@ export function ChatInterface() {
           .join("\n")}`,
         timestamp: new Date(),
       };
-
-      setMessages((prev) => [...prev, assistantMessage]);
+      const updatedMessages = [...newMessages, assistantMessage];
+      setMessages(updatedMessages);
       setChecklistIds((prev) => ({
         ...prev,
         [assistantMessage.id]: data.checklistId,
       }));
+      saveCurrentSession(updatedMessages);
     } catch (error) {
       console.error("Error analyzing images:", error);
     } finally {
@@ -74,61 +155,54 @@ export function ChatInterface() {
 
   const handleSendMessage = async () => {
     if (!input.trim()) return;
-
     const userMessage: ChatMessage = {
       id: uuidv4(),
       role: "user",
       content: input,
       timestamp: new Date(),
     };
-
-    setMessages((prev) => [...prev, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInput("");
     setIsLoading(true);
-
+    saveCurrentSession(newMessages);
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          messages: [...messages, userMessage],
+          messages: newMessages,
         }),
       });
-
       if (!response.ok) throw new Error("Failed to send message");
-
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-
       const assistantMessage: ChatMessage = {
         id: uuidv4(),
         role: "assistant",
         content: "",
         timestamp: new Date(),
       };
-
-      setMessages((prev) => [...prev, assistantMessage]);
-
+      let streamedMessages = [...newMessages, assistantMessage];
+      setMessages(streamedMessages);
       while (true) {
         const { done, value } = await reader!.read();
         if (done) break;
-
         const chunk = decoder.decode(value);
         const lines = chunk.split("\n");
-
         for (const line of lines) {
           if (line.startsWith("0:")) {
             const content = line.slice(2);
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantMessage.id
-                  ? { ...msg, content: msg.content + content }
-                  : msg
-              )
+            streamedMessages = streamedMessages.map((msg) =>
+              msg.id === assistantMessage.id
+                ? { ...msg, content: msg.content + content }
+                : msg
             );
+            setMessages(streamedMessages);
           }
         }
       }
+      saveCurrentSession(streamedMessages);
     } catch (error) {
       console.error("Error sending message:", error);
     } finally {
@@ -136,16 +210,56 @@ export function ChatInterface() {
     }
   };
 
+  const handleSessionSelect = (session: ChatSession) => {
+    loadSession(session);
+    setSidebarOpen(false);
+  };
+
+  const handleNewSession = () => {
+    createNewSession();
+    setSidebarOpen(false);
+  };
+
+  // Add a function to refresh the sidebar when sessions are deleted
+  const refreshSidebar = () => {
+    setRefreshTrigger((prev) => prev + 1);
+  };
+
   return (
-    <div className="flex flex-col h-screen max-w-4xl mx-auto p-4">
-      <Card className="flex-1 flex flex-col">
-        <div className="p-4 border-b">
-          <h1 className="text-2xl font-bold">AI Order Analyzer</h1>
-          <p className="text-gray-600">
-            Upload images of orders to extract item details
-          </p>
+    <div className="flex h-screen">
+      {/* Sidebar */}
+      <div className={`${sidebarOpen ? "block" : "hidden"} md:block`}>
+        <ChatSidebar
+          onSessionSelect={handleSessionSelect}
+          onNewSession={handleNewSession}
+          currentSessionId={currentSession?.id}
+          refreshTrigger={refreshTrigger}
+        />
+      </div>
+
+      {/* Main Chat Area */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              variant="ghost"
+              size="sm"
+              className="md:hidden"
+            >
+              <Menu size={20} />
+            </Button>
+            <div>
+              <h1 className="text-2xl font-bold">AI Order Analyzer</h1>
+              <p className="text-gray-600">
+                Upload images of orders to extract item details
+              </p>
+            </div>
+          </div>
         </div>
 
+        {/* Chat Messages */}
         <ScrollArea className="flex-1 p-4">
           {messages.map((message) => (
             <MessageBubble
@@ -166,6 +280,7 @@ export function ChatInterface() {
           )}
         </ScrollArea>
 
+        {/* Input Area */}
         <div className="p-4 border-t space-y-4">
           <ImageUpload onImageUpload={handleImageUpload} disabled={isLoading} />
 
@@ -191,7 +306,7 @@ export function ChatInterface() {
             </Button>
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }

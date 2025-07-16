@@ -1,11 +1,10 @@
 import { ChecklistPage } from "@/components/checklist/ChecklistPage";
 
 interface PageProps {
-  params: {
-    id: string;
-  };
+  params: Promise<{ id: string }>;
 }
 
-export default function ChecklistSharePage({ params }: PageProps) {
-  return <ChecklistPage checklistId={params.id} />;
+export default async function ChecklistSharePage({ params }: PageProps) {
+  const { id } = await params;
+  return <ChecklistPage checklistId={id} />;
 }
