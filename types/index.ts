@@ -10,6 +10,7 @@ export interface ChatMessage {
   content: string;
   images?: string[];
   timestamp: Date;
+  checklistId?: string;
 }
 
 export interface TemporaryChecklist {

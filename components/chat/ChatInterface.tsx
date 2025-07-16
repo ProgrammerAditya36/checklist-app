@@ -60,9 +60,14 @@ export function ChatInterface() {
   const loadSession = (session: ChatSession) => {
     setCurrentSession(session);
     setMessages(session.messages);
-    // Note: checklistIds would need to be reconstructed from messages
-    // For now, we'll start fresh with checklistIds
-    setChecklistIds({});
+    // Reconstruct checklistIds from messages for backward compatibility
+    const ids: { [messageId: string]: string } = {};
+    session.messages.forEach((msg) => {
+      if (msg.checklistId) {
+        ids[msg.id] = msg.checklistId;
+      }
+    });
+    setChecklistIds(ids);
   };
 
   const saveCurrentSession = (messagesOverride?: ChatMessage[]) => {
@@ -138,6 +143,7 @@ export function ChatInterface() {
           )
           .join("\n")}`,
         timestamp: new Date(),
+        checklistId: data.checklistId,
       };
       const updatedMessages = [...newMessages, assistantMessage];
       setMessages(updatedMessages);
@@ -182,6 +188,7 @@ export function ChatInterface() {
         role: "assistant",
         content: "",
         timestamp: new Date(),
+        // checklistId will be undefined for normal chat
       };
       let streamedMessages = [...newMessages, assistantMessage];
       setMessages(streamedMessages);
@@ -265,7 +272,7 @@ export function ChatInterface() {
             <MessageBubble
               key={message.id}
               message={message}
-              checklistId={checklistIds[message.id]}
+              checklistId={message.checklistId || checklistIds[message.id]}
             />
           ))}
           {isLoading && (
