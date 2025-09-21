@@ -1,7 +1,7 @@
 import { ChatSession } from "@/types";
 
 // Simple in-memory storage for temporary checklists
-// In production, you might want to use Redis or similar
+// This is now deprecated in favor of MongoDB, but kept for fallback
 const storage = new Map<string, any>();
 
 export const temporaryStorage = {

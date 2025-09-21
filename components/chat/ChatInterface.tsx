@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { chatStorage } from "@/lib/storage";
+import { chatService } from "@/lib/chatService";
 import { ChatMessage, ChatSession, ChecklistItem } from "@/types";
 import { Menu, Send } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -28,21 +28,24 @@ export function ChatInterface() {
 
   // Load sessions on mount
   useEffect(() => {
-    const sessions = chatStorage.getChatSessions();
-    if (sessions.length > 0) {
-      // Load the most recent session
-      const mostRecent = sessions.sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      )[0];
-      loadSession(mostRecent);
-    } else {
-      // Create a new session if none exist
-      createNewSession();
-    }
+    const loadSessions = async () => {
+      const sessions = await chatService.getChatSessions();
+      if (sessions.length > 0) {
+        // Load the most recent session
+        const mostRecent = sessions.sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        )[0];
+        loadSession(mostRecent);
+      } else {
+        // Create a new session if none exist
+        createNewSession();
+      }
+    };
+    loadSessions();
   }, []);
 
-  const createNewSession = () => {
+  const createNewSession = async () => {
     const newSession: ChatSession = {
       id: uuidv4(),
       title: "New Chat",
@@ -53,7 +56,7 @@ export function ChatInterface() {
     setCurrentSession(newSession);
     setMessages([]);
     setChecklistIds({});
-    chatStorage.saveChatSession(newSession);
+    await chatService.saveChatSession(newSession);
     setRefreshTrigger((prev) => prev + 1); // Trigger sidebar refresh
   };
 
@@ -70,7 +73,7 @@ export function ChatInterface() {
     setChecklistIds(ids);
   };
 
-  const saveCurrentSession = (messagesOverride?: ChatMessage[]) => {
+  const saveCurrentSession = async (messagesOverride?: ChatMessage[]) => {
     if (!currentSession) return;
     const sessionMessages = messagesOverride || messages;
     const updatedSession: ChatSession = {
@@ -80,7 +83,7 @@ export function ChatInterface() {
       title: generateSessionTitle(sessionMessages),
     };
     setCurrentSession(updatedSession);
-    chatStorage.saveChatSession(updatedSession);
+    await chatService.saveChatSession(updatedSession);
     setRefreshTrigger((prev) => prev + 1);
   };
 
@@ -89,8 +92,8 @@ export function ChatInterface() {
     let timeoutId: NodeJS.Timeout;
     return () => {
       clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => {
-        saveCurrentSession();
+      timeoutId = setTimeout(async () => {
+        await saveCurrentSession();
       }, 1000); // Wait 1 second after last update
     };
   })();
@@ -119,7 +122,7 @@ export function ChatInterface() {
     };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
-    saveCurrentSession(newMessages);
+    await saveCurrentSession(newMessages);
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -151,7 +154,7 @@ export function ChatInterface() {
         ...prev,
         [assistantMessage.id]: data.checklistId,
       }));
-      saveCurrentSession(updatedMessages);
+      await saveCurrentSession(updatedMessages);
     } catch (error) {
       console.error("Error analyzing images:", error);
     } finally {
@@ -171,7 +174,7 @@ export function ChatInterface() {
     setMessages(newMessages);
     setInput("");
     setIsLoading(true);
-    saveCurrentSession(newMessages);
+    await saveCurrentSession(newMessages);
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -209,7 +212,7 @@ export function ChatInterface() {
           }
         }
       }
-      saveCurrentSession(streamedMessages);
+      await saveCurrentSession(streamedMessages);
     } catch (error) {
       console.error("Error sending message:", error);
     } finally {
@@ -245,9 +248,9 @@ export function ChatInterface() {
       </div>
 
       {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex flex-col flex-1">
         {/* Header */}
-        <div className="p-4 border-b flex items-center justify-between">
+        <div className="flex justify-between items-center p-4 border-b">
           <div className="flex items-center gap-2">
             <Button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -258,7 +261,7 @@ export function ChatInterface() {
               <Menu size={20} />
             </Button>
             <div>
-              <h1 className="text-2xl font-bold">AI Order Analyzer</h1>
+              <h1 className="font-bold text-2xl">AI Order Analyzer</h1>
               <p className="text-gray-600">
                 Upload images of orders to extract item details
               </p>
@@ -277,9 +280,9 @@ export function ChatInterface() {
           ))}
           {isLoading && (
             <div className="flex justify-start mb-4">
-              <Card className="p-4 bg-muted">
+              <Card className="bg-muted p-4">
                 <div className="flex items-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                  <div className="border-primary border-b-2 rounded-full w-4 h-4 animate-spin"></div>
                   <span>Analyzing...</span>
                 </div>
               </Card>
@@ -288,7 +291,7 @@ export function ChatInterface() {
         </ScrollArea>
 
         {/* Input Area */}
-        <div className="p-4 border-t space-y-4">
+        <div className="space-y-4 p-4 border-t">
           <ImageUpload onImageUpload={handleImageUpload} disabled={isLoading} />
 
           <div className="flex gap-2">

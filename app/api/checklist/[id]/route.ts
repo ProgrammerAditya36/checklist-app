@@ -1,4 +1,5 @@
-import { temporaryStorage } from "@/lib/storage";
+import Checklist from "@/lib/models/Checklist";
+import connectDB from "@/lib/mongodb";
 import { NextRequest } from "next/server";
 
 export async function GET(
@@ -7,7 +8,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const checklist = temporaryStorage.get(id);
+    await connectDB();
+
+    const checklist = await Checklist.findById(id);
 
     if (!checklist) {
       return Response.json(
@@ -16,7 +19,11 @@ export async function GET(
       );
     }
 
-    return Response.json(checklist);
+    return Response.json({
+      items: checklist.items,
+      createdAt: checklist.createdAt,
+      expiresAt: checklist.expiresAt,
+    });
   } catch (error) {
     console.error("Checklist API error:", error);
     return Response.json({ error: "Internal server error" }, { status: 500 });

@@ -1,4 +1,5 @@
-import { temporaryStorage } from "@/lib/storage";
+import Checklist from "@/lib/models/Checklist";
+import connectDB from "@/lib/mongodb";
 import { google } from "@ai-sdk/google";
 import { generateObject, streamText } from "ai";
 import { NextRequest } from "next/server";
@@ -48,17 +49,16 @@ export async function POST(req: NextRequest) {
         ],
       });
 
-      // Store the checklist temporarily (2 days = 172800000 ms)
+      // Store the checklist in MongoDB (2 days = 172800000 ms)
+      await connectDB();
       const checklistId = uuidv4();
-      temporaryStorage.set(
-        checklistId,
-        {
-          items: result.object.items,
-          createdAt: new Date(),
-          expiresAt: new Date(Date.now() + 172800000), // 2 days
-        },
-        172800000
-      );
+      const checklist = new Checklist({
+        _id: checklistId,
+        items: result.object.items,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 172800000), // 2 days
+      });
+      await checklist.save();
 
       return Response.json({
         checklistId,
